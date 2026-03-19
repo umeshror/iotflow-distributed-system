@@ -1,19 +1,23 @@
-### [STRATEGIC] 1. Implement Local Disk Spillover (RocksDB)
-**Context**: During extended Kafka outages, our 10,000-event memory buffer in the Ingestion Service can fill up.
-**Task**: Use a local persistent store to buffer messages on disk when Kafka is unavailable.
-**Staff Signal**: Showcases "Worst-Day" resilience thinking.
+# 🐞 Strategic Issues & Future Roadmap
 
-### [STRATEGIC] 2. Distributed Tracing (OpenTelemetry)
-**Context**: We need per-event visibility across the Ingestion -> Kafka -> Worker lifecycle.
-**Task**: Instrument the `Pipeline` utility with OTEL spans to track end-to-end latency.
-**Staff Signal**: Highlights observability maturity.
+These are "Smart Hack" issues that showcase the long-term thinking and operational maturity of the project.
 
-### [STRATEGIC] 3. Handle Kafka Consumer Lag (Dynamic Scaling)
-**Context**: Sudden traffic bursts can cause Kafka lag.
-**Task**: Enhance the KEDA-driven scaling to adjust worker count dynamically based on lag thresholds.
-**Staff Signal**: Demonstrates deep understanding of event-driven bottlenecks.
+### 1. [Good First Issue] Add Exponential Retry Mechanism
+**Status**: Planned  
+**Context**: We need a configurable backoff strategy for transient DB/Kafka failures.
+**Task**: Refactor `PersistenceHandler` to use dynamic backoff parameters.
 
-### [STRATEGIC] 4. Advanced Observability Dashboard
-**Context**: Current Grafana dashboard is static.
-**Task**: Add per-device and per-handler metrics to pinpoint latency spikes in the pipeline.
-**Staff Signal**: Shows operational focus.
+### 2. [Enhancement] Implement Idempotency using Redis
+**Status**: Implemented (Enhancement: Multi-AZ support)  
+**Context**: Current idempotency check is single-instance.
+**Task**: Transition to `Redlock` or Redis Cluster for cross-region deduplication.
+
+### 3. [Performance] Handle Kafka Consumer Lag
+**Status**: Critical  
+**Context**: Sudden traffic bursts can outpace a single consumer group.
+**Task**: Integrate KEDA (Kubernetes Event-driven Autoscaling) to scale worker pods based on lag metrics.
+
+### 4. [Observability] Add Metrics Dashboard
+**Status**: In Progress  
+**Context**: We need real-time p99 latency visibility for each pipeline handler.
+**Task**: Export handler-level Prometheus metrics for the Grafana dashboard.

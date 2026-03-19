@@ -123,6 +123,18 @@ Full Failure Analysis → [`docs/failures.md`](docs/failures.md)
 
 ---
 
+## 🧱 Real System Components (Source Code)
+
+IoTFlow is not a skeleton; it features **real production-grade logic** for distributed systems safety:
+
+- **Retry Logic**: Exponential backoff with jitter implemented in [`apps/worker/handlers.py`](apps/worker/handlers.py).
+- **Dead Letter Queue (DLQ)**: Automatic poison-message routing in [`apps/worker/handlers.py`](apps/worker/handlers.py).
+- **Idempotency**: Redis-backed "exactly-once" processing in [`apps/worker/handlers.py`](apps/worker/handlers.py).
+- **Backpressure**: Asynchronous semaphore-based flow control in [`apps/ingestion/main.py`](apps/ingestion/main.py).
+- **Clean Architecture**: Middleware-inspired `Pipeline` pattern in [`libs/shared/pipeline.py`](libs/shared/pipeline.py).
+
+---
+
 ## 🛠️ How to Run Locally
 
 ### 1. Requirements
