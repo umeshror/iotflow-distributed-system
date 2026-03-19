@@ -42,51 +42,55 @@ graph TD
 
 ### **Detailed Component View**
 ```mermaid
+%%{init: {'theme': 'neutral', 'themeVariables': { 'mainBkg': '#f9f9f9', 'nodeBorder': '#333'}}}%%
 graph TB
     subgraph Devices["fa:fa-microchip IoT Edge (5M+ Sensors)"]
-        D1["fa:fa-broadcast-tower Device A"]
-        D2["fa:fa-broadcast-tower Device B"]
+        D1[fa:fa-broadcast-tower Device A]
+        D2[fa:fa-broadcast-tower Device B]
     end
 
     subgraph apps["fa:fa-cubes apps/ (Services)"]
+        direction TB
         subgraph IS["fa:fa-server Ingestion Service (FastAPI)"]
-            P1["fa:fa-search Validate"] --> P2["fa:fa-shield-halved Rate Limit"]
-            P2 --> P3["fa:fa-share-nodes Kafka Produce"]
+            direction LR
+            P1[fa:fa-search Validate] --> P2[fa:fa-shield-halved Rate Limit] --> P3[fa:fa-share-nodes Kafka Produce]
         end
         
         subgraph WS["fa:fa-gears Worker Service (asyncio)"]
-            H1["fa:fa-fingerprint Idempotency"] --> H2["fa:fa-database Persist"]
-            H2 --> H3["fa:fa-chart-line Update State"]
+            direction LR
+            H1[fa:fa-fingerprint Idempotency] --> H2[fa:fa-database Persist] --> H3[fa:fa-chart-line Update State]
         end
     end
 
     subgraph libs["fa:fa-book-open libs/ (Shared Bundles)"]
-        SharedP["fa:fa-code Pipeline Core"]
-        SharedM["fa:fa-table IoTEvent Models"]
+        SharedP[fa:fa-code Pipeline Core]
+        SharedM[fa:fa-table IoTEvent Models]
     end
 
-    subgraph infra["fa:fa-network-wired infra/ (Foundation)"]
-        K2["fa:fa-vial Kafka Cluster\n3-Node"]
-        PG["fa:fa-database PostgreSQL\nPartitioned"]
-        RC["fa:fa-bolt Redis Cluster\nDedup Cache"]
-        DLQ["fa:fa-trash-can Kafka DLQ\nPoison Events"]
+    subgraph infra["fa:fa-network-wired infra/ (Distributed Foundation)"]
+        K2[fa:fa-vial Kafka Cluster\n3-Node / KRaft]
+        PG[fa:fa-database PostgreSQL\nPartitioned History]
+        RC[fa:fa-bolt Redis Cluster\nDedup Cache]
+        DLQ[fa:fa-trash-can Kafka DLQ\nPoison Events]
     end
 
-    D1 & D2 -- "fa:fa-wifi MQTT QoS1" --> P1
-    P3 -- "iot.events.raw" --> K2
-    K2 -- "Batch Consume" --> H1
-    H3 -- "Commit" --> PG
-    H3 -- "Cache" --> RC
-    H2 -. "Error" .-> DLQ
+    D1 & D2 -- "fa:fa-wifi MQTT QoS1" --> IS
+    IS -- "iot.events.raw" --> K2
+    K2 -- "Batch Consume" --> WS
+    WS -- "Commit" --> infra
+    WS -. "Error Fallback" .-> DLQ
 
     %% Internal Library Dependencies
-    P1 & H1 -. "import" .-> SharedP
+    IS & WS -. "import" .-> libs
 
     %% Styling
     style IS fill:#e1f5fe,stroke:#01579b,stroke-width:2px
     style WS fill:#fff3e0,stroke:#e65100,stroke-width:2px
     style libs fill:#f3e5f5,stroke:#4a148c,stroke-dasharray: 5 5
     style infra fill:#f1f8e9,stroke:#1b5e20,stroke-width:2px
+    style K2 fill:#fff,stroke:#333
+    style PG fill:#fff,stroke:#333
+    style RC fill:#fff,stroke:#333
 ```
 
 ### **Monorepo Structure**
