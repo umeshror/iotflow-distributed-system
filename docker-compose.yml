@@ -1,0 +1,225 @@
+services:
+  # ---------------------------------------------------------------------------
+  # Infrastructure
+  # ---------------------------------------------------------------------------
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: iotflow-mosquitto
+    ports:
+      - "11883:1883"
+      - "19001:9001"  # WebSocket
+    volumes:
+      - ./config/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_pub -h localhost -p 1883 -t '_healthcheck' -m 'ok' -q 0 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - iotflow-net
+
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: iotflow-kafka
+    ports:
+      - "19092:9092"
+      - "19093:9093"  # Controller
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 12
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1  # 1 for local dev (3 in prod)
+      KAFKA_LOG_RETENTION_HOURS: 168       # 7 days
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - iotflow-net
+
+  kafka-init:
+    image: apache/kafka:3.8.0
+    container_name: iotflow-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        echo "Creating Kafka topics..."
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic iot.events.raw --partitions 12 --replication-factor 1 \
+          --config retention.ms=604800000
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic iot.events.validated --partitions 12 --replication-factor 1 \
+          --config retention.ms=604800000
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic iot.events.dlq --partitions 6 --replication-factor 1 \
+          --config retention.ms=2592000000
+        echo "Topics created successfully."
+    networks:
+      - iotflow-net
+    restart: "no"
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: iotflow-redis
+    ports:
+      - "16379:6379"
+    command: redis-server --requirepass "${REDIS_PASSWORD:-iotflow_redis}" --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-iotflow_redis}", "PING"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - iotflow-net
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: iotflow-postgres
+    ports:
+      - "15432:5432"
+    environment:
+      POSTGRES_DB: iotflow
+      POSTGRES_USER: iotflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-iotflow_secret}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations/001_initial.sql:/docker-entrypoint-initdb.d/001_initial.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iotflow -d iotflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - iotflow-net
+
+  # ---------------------------------------------------------------------------
+  # Application Services
+  # ---------------------------------------------------------------------------
+  ingestion:
+    build:
+      context: .
+      dockerfile: services/ingestion/Dockerfile
+    container_name: iotflow-ingestion
+    ports:
+      - "18000:8000"   # FastAPI
+      - "19100:9100"   # Prometheus metrics
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-iotflow_redis}@redis:6379/0"
+      LOG_LEVEL: INFO
+      ENV: development
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks:
+      - iotflow-net
+
+  worker:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    container_name: iotflow-worker
+    ports:
+      - "19101:9101"   # Prometheus metrics
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-iotflow_redis}@redis:6379/0"
+      DATABASE_URL: "postgresql://iotflow:${POSTGRES_PASSWORD:-iotflow_secret}@postgres:5432/iotflow"
+      WORKER_ID: worker-1
+      LOG_LEVEL: INFO
+      ENV: development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks:
+      - iotflow-net
+
+  # ---------------------------------------------------------------------------
+  # Observability
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: iotflow-prometheus
+    ports:
+      - "19090:9090"
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    networks:
+      - iotflow-net
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: iotflow-grafana
+    ports:
+      - "13000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/iotflow.json
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    networks:
+      - iotflow-net
+
+# ---------------------------------------------------------------------------
+# Shared network & named volumes
+# ---------------------------------------------------------------------------
+networks:
+  iotflow-net:
+    driver: bridge
+
+volumes:
+  mosquitto_data:
+  mosquitto_log:
+  kafka_data:
+  redis_data:
+  postgres_data:
+  prometheus_data:
+  grafana_data:

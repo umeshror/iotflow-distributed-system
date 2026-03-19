@@ -1,0 +1,40 @@
+# Contributing to IoTFlow
+
+Thank you for your interest in contributing to IoTFlow! We welcome contributions from the community to help make this system more robust and scalable.
+
+## How to Contribute
+
+1.  **Report Bugs**: Open an issue if you find a bug or something that doesn't work as expected.
+2.  **Suggest Features**: Have an idea to make IoTFlow better? Open a feature request!
+3.  **Submit Pull Requests**:
+    *   Fork the repository.
+    *   Create a new branch for your changes.
+    *   Ensure your code follows the existing style and is well-documented.
+    *   Add tests for any new functionality.
+    *   Open a PR with a clear description of your changes.
+
+## Development Setup
+
+To run IoTFlow locally for development:
+
+```bash
+# 1. Clone your fork
+git clone https://github.com/YOUR_USERNAME/Iot-flow.git
+cd Iot-flow
+
+# 2. Start the infrastructure
+cp .env.example .env
+docker compose up -d
+
+# 3. Run tests (if applicable)
+# TODO: Add test execution instructions
+```
+
+## Community
+
+*   Join our discussions in the GitHub Issues.
+*   Follow our [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## License
+
+By contributing to IoTFlow, you agree that your contributions will be licensed under the [Apache License 2.0](LICENSE).
