@@ -3,7 +3,7 @@
 > **A production-ready system designed for unreliable IoT environments.**
 > Built for **100K+ events/sec** with strong idempotency, failure handling, and multi-AZ resilience.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-green.svg)](https://www.python.org/)
 [![Docker Compose](https://img.shields.io/badge/docker--compose-ready-blue.svg)](docker-compose.yml)
 
@@ -120,14 +120,18 @@ Wait ~30s for healthchecks. `docker compose ps` should show all services as `(he
 
 ### 3. Simulate High-Scale Event
 ```bash
-mosquitto_pub -h localhost -p 1883 -t "devices/sensor-001/events" \
-  -m '{"event_id":"01HXYZABCDEFGHJKMNPQRSTVWX","device_id":"sensor-001","event_type":"temp","timestamp":"2026-03-19T14:00:00Z","payload":{"value":72.4}}'
+# Using remapped host port 11883
+docker exec iotflow-mosquitto mosquitto_pub -h localhost -p 1883 -t "devices/sensor-001/events" \
+  -m '{"event_id":"01HXYZABCDEFGHJKMNPQRSTVWX","device_id":"sensor-001","event_type":"temperature","timestamp":"2026-03-19T14:00:00Z","payload":{"value":22.5},"metadata":{"unit":"celsius"},"schema_version":"1.0"}'
 ```
 
 ### 4. Verify
 - **Log monitoring**: `docker compose logs -f worker`
-- **DB Check**: `docker compose exec postgres psql -U iotflow -c "SELECT * FROM events LIMIT 5;"`
-- **Metrics**: Open `http://localhost:3000` (Grafana) | `http://localhost:9090` (Prometheus)
+- **DB Check**: `docker exec iotflow-postgres psql -U iotflow -c "SELECT event_id, device_id, event_type, processed_at FROM events;"`
+- **Metrics**: 
+    - **Grafana**: `http://localhost:13000` (User: `admin`, Pass: `admin`)
+    - **Prometheus**: `http://localhost:19090`
+    - **FastAPI**: `http://localhost:18000`
 
 ---
 
@@ -144,4 +148,4 @@ Browse the core documentation for a deep-dive into each layer.
 ---
 
 ## License
-MIT — See [LICENSE](LICENSE).
+Apache License 2.0 — See [LICENSE](LICENSE).
