@@ -43,43 +43,50 @@ graph TD
 ### **Detailed Component View**
 ```mermaid
 graph TB
-    subgraph "IoT Edge"
-        D1[Device A]
-        D2[Device B]
+    subgraph Devices["fa:fa-microchip IoT Edge (5M+ Sensors)"]
+        D1["fa:fa-broadcast-tower Device A"]
+        D2["fa:fa-broadcast-tower Device B"]
     end
 
-    subgraph IS ["Ingestion Service"]
-        P1[Validate] --> P2[Rate Limit]
-        P2 --> P3[Kafka Produce]
-    end
-    
-    subgraph WS ["Worker Service"]
-        H1[Idempotency] --> H2[Persist]
-        H2 --> H3[Update State]
-    end
-
-    subgraph LIBS ["Shared Libraries"]
-        SharedP[Pipeline Core]
-        SharedM[Models]
+    subgraph apps["fa:fa-cubes apps/ (Services)"]
+        subgraph IS["fa:fa-server Ingestion Service (FastAPI)"]
+            P1["fa:fa-search Validate"] --> P2["fa:fa-shield-halved Rate Limit"]
+            P2 --> P3["fa:fa-share-nodes Kafka Produce"]
+        end
+        
+        subgraph WS["fa:fa-gears Worker Service (asyncio)"]
+            H1["fa:fa-fingerprint Idempotency"] --> H2["fa:fa-database Persist"]
+            H2 --> H3["fa:fa-chart-line Update State"]
+        end
     end
 
-    subgraph INFRA ["Infrastructure"]
-        K2[Kafka Cluster]
-        PG[PostgreSQL]
-        RC[Redis Cluster]
-        DLQ[Kafka DLQ]
+    subgraph libs["fa:fa-book-open libs/ (Shared Bundles)"]
+        SharedP["fa:fa-code Pipeline Core"]
+        SharedM["fa:fa-table IoTEvent Models"]
     end
 
-    D1 --> P1
-    D2 --> P1
+    subgraph infra["fa:fa-network-wired infra/ (Foundation)"]
+        K2["fa:fa-vial Kafka Cluster\n3-Node"]
+        PG["fa:fa-database PostgreSQL\nPartitioned"]
+        RC["fa:fa-bolt Redis Cluster\nDedup Cache"]
+        DLQ["fa:fa-trash-can Kafka DLQ\nPoison Events"]
+    end
+
+    D1 & D2 -- "fa:fa-wifi MQTT QoS1" --> P1
     P3 -- "iot.events.raw" --> K2
     K2 -- "Batch Consume" --> H1
     H3 -- "Commit" --> PG
     H3 -- "Cache" --> RC
     H2 -. "Error" .-> DLQ
 
-    style IS fill:#e1f5fe,stroke:#01579b
-    style WS fill:#fff3e0,stroke:#e65100
+    %% Internal Library Dependencies
+    P1 & H1 -. "import" .-> SharedP
+
+    %% Styling
+    style IS fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style WS fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style libs fill:#f3e5f5,stroke:#4a148c,stroke-dasharray: 5 5
+    style infra fill:#f1f8e9,stroke:#1b5e20,stroke-width:2px
 ```
 
 ### **Monorepo Structure**
