@@ -1,6 +1,6 @@
-# IoTFlow: Distributed Event Ingestion & Processing
+# IoTFlow: Scalable Reference Architecture for IoT Event Pipelines
 
-> **A production-ready system designed for unreliable IoT environments.**
+> **A production-grade distributed system designed for unreliable IoT environments.**
 > Built for **100K+ events/sec** with strong idempotency, failure handling, and multi-AZ resilience.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
@@ -144,6 +144,7 @@ Browse the core documentation for a deep-dive into each layer.
 - [**Failover Analysis**](docs/failover_analysis.md): 15 failure scenarios and mitigations.
 - [**Capacity Planning**](docs/capacity_planning.md): Hardware sizing and storage growth.
 - [**API & Data Model**](docs/api_design.md): Payloads, topics, and schemas.
+- [**Project Roadmap**](docs/ROADMAP.md): Future improvements & starter issues.
 
 ---
 

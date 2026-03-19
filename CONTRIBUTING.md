@@ -13,6 +13,18 @@ Thank you for your interest in contributing to IoTFlow! We welcome contributions
     *   Add tests for any new functionality.
     *   Open a PR with a clear description of your changes.
 
+## Coding Standards
+
+To maintain a high level of code quality, we follow these standards:
+
+- **Python**: Use Python 3.12+ features. Follow PEP 8.
+- **Asyncio**: Use `async`/`await` for all I/O bound operations. Avoid blocking calls in the event loop.
+- **Typing**: Use static type hints everywhere (PEP 484).
+- **Validation**: Use Pydantic for all data validation and configuration.
+- **Logging**: Use `structlog` for structured, JSON-ready logging.
+- **Metrics**: Instrument new features with Prometheus metrics where appropriate.
+- **Tests**: Add unit tests for core logic in `services/shared` and integration tests for service components.
+
 ## Development Setup
 
 To run IoTFlow locally for development:
@@ -26,8 +38,8 @@ cd Iot-flow
 cp .env.example .env
 docker compose up -d
 
-# 3. Run tests (if applicable)
-# TODO: Add test execution instructions
+# 3. Simulate events
+# Use the commands provided in the README.md to verify your changes.
 ```
 
 ## Community
