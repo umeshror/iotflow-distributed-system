@@ -20,87 +20,78 @@ In industrial IoT (factories, energy grids, logistics), devices operate in "hars
 
 ---
 
-## 🏗️ High-Scale v2 Architecture (100K msg/s)
+## 🏗️ Core Architecture (v2.2)
 
-This system is designed around a **decoupled, event-driven architecture** optimized for throughput and linear horizontal scaling.
+IoTFlow implements a **Clean Architecture** with a middleware-inspired **Processing Pipeline**. This decouples transport-specific logic (MQTT, Kafka) from core business logic (Idempotency, State Persistence).
 
 ```mermaid
+%%{init: {'theme': 'neutral', 'themeVariables': { 'mainBkg': '#f9f9f9', 'nodeBorder': '#333'}}}%%
 graph TB
-    subgraph Devices["IoT Devices (5M+)"]
-        D[Sensors]
+    subgraph Devices["fa:fa-microchip IoT Edge (5M+ Sensors)"]
+        D1[fa:fa-broadcast-tower Device A]
+        D2[fa:fa-broadcast-tower Device B]
     end
 
-    subgraph LB["Load Balancer (NLB)"]
-        NLB[MQTT LB\nConsistent Hash]
+    subgraph apps["fa:fa-cubes apps/ (Services)"]
+        direction TB
+        subgraph IS["fa:fa-server Ingestion Service (FastAPI)"]
+            direction LR
+            P1[fa:fa-search Validate] --> P2[fa:fa-shield-halved Rate Limit] --> P3[fa:fa-share-nodes Kafka Produce]
+        end
+        
+        subgraph WS["fa:fa-gears Worker Service (asyncio)"]
+            direction LR
+            H1[fa:fa-fingerprint Idempotency] --> H2[fa:fa-database Persist] --> H3[fa:fa-chart-line Update State]
+        end
     end
 
-    subgraph Ingestion["Ingestion Service (FastAPI)"]
-        IS["16 Dispatchers/Pod\nBatched Kafka Produce\nLocal Rate-Limit Cache"]
+    subgraph libs["fa:fa-book-open libs/ (Shared Bundles)"]
+        SharedP[fa:fa-code Pipeline Core]
+        SharedM[fa:fa-table IoTEvent Models]
     end
 
-    subgraph Streaming["Kafka Cluster (v2)"]
-        K2["48 Partitions\n5 Brokers\nReplication=3"]
+    subgraph infra["fa:fa-network-wired infra/ (Distributed Foundation)"]
+        K2[fa:fa-vial Kafka Cluster\n3-Node / KRaft]
+        PG[fa:fa-database PostgreSQL\nPartitioned History]
+        RC[fa:fa-bolt Redis Cluster\nDedup Cache]
+        DLQ[fa:fa-trash-can Kafka DLQ\nPoison Events]
     end
 
-    subgraph Workers["Worker Service (asyncio)"]
-        W["KEDA Scaled (48 pods)\nSemaphore Backpressure\nPipelined Idempotency"]
-    end
+    D1 & D2 -- "fa:fa-wifi MQTT QoS1" --> IS
+    IS -- "iot.events.raw" --> K2
+    K2 -- "Batch Consume" --> WS
+    WS -- "Commit" --> infra
+    WS -. "Error Fallback" .-> DLQ
 
-    subgraph State["State Tier"]
-        RC[Redis Cluster\n12 Shards]
-        PG[PostgreSQL\n4 Shards (BRIN)]
-    end
+    %% Internal Library Dependencies
+    IS & WS -. "import" .-> libs
 
-    D -->|MQTT QoS1| NLB
-    NLB --> IS
-    IS -->|Batch| K2
-    K2 --> W
-    W -->|Pipeline| RC
-    W -->|Sharded| PG
+    %% Styling
+    style IS fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style WS fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style libs fill:#f3e5f5,stroke:#4a148c,stroke-dasharray: 5 5
+    style infra fill:#f1f8e9,stroke:#1b5e20,stroke-width:2px
+    style K2 fill:#fff,stroke:#333
+    style PG fill:#fff,stroke:#333
+    style RC fill:#fff,stroke:#333
 ```
 
-### **Core Design Decisions**
-| Decision | Rationale | Staff Engineer Insight |
-|---|---|---|
-| **Kafka vs NATS** | Kafka's durable log + ecosystem. | High-scale rebalancing is more mature in Kafka; NATS is better for Command & Control. |
-| **At-Least-Once** | Performance priority. | Handling duplicates at the sink (Worker) is cheaper than transactional produce. |
-| **Dual-Layer Dedup** | DB Health Protection. | Redis provides a sub-ms "Fast-Path" before the expensive sharded DB write. |
-| **Batch Flush** | 20x Produce Throughput. | Decoupling MQTT receive from Kafka ACK amortizes broker RTT across 200+ events. |
+### **Monorepo Structure**
+- `apps/`: Deployable microservices (Ingestion, Worker).
+- `libs/shared/`: Reusable internal libraries (Models, Pipeline logic, Logging).
+- `infra/`: Infrastructure-as-Code (Docker Compose, K8s manifests, Grafana configs).
+- `scripts/`: Operational tools and high-fidelity simulation scripts.
 
 ---
 
 ## 📈 Capacity & Scaling (v2)
-
-IoTFlow is architected for **linear horizontal scaling**. Adding nodes to any tier increases performance predictably.
-
-| Tier | Baseline (4.2K/s) | High-Scale (100K/s) | Scale trigger |
-|---|---|---|---|
-| **Ingestion** | 3 pods | 40 pods | CPU > 60% (HPA) |
-| **Workers** | 7 pods | 48–128 pods | Kafka Lag > 500 (KEDA) |
-| **Kafka** | 12 partitions | 48–64 partitions | Throughput > 80% |
-| **Redis** | 3 shards | 12 shards | Memory > 70% |
-| **PostgreSQL** | 1 primary | 4–6 sharded primaries | Write latency p99 > 50ms |
-
-- **Storage Growth**: ~4.3 TB/day raw telemetry at 50K msg/s.
-- **Memory**: ~1.1 TB Redis RAM required for 72h idempotency window.
-- **Network**: ~1.2 Gbps internal internal bandwidth optimized via batching.
-
+...
 Full Capacity Planning → [`docs/capacity_planning.md`](docs/capacity_planning.md)
 
 ---
 
 ## 🛡️ Failure Handling & Audit
-
-How the system handles "The Worst Day" scenarios (15 scenarios audited).
-
-| Scenario | Behavior | Robust Staff+ Fix |
-|---|---|---|
-| **Poison Message** | Validated at Ingestion/Worker. | Sent to DLQ immediately; no infinite retry. |
-| **Kafka Downtime** | 10K internal buffer. | Spillover to local persistent storage (RocksDB sidecar). |
-| **Redis Down** | Fail-Open (Skip dedup). | DB `ON CONFLICT` safety net catches all duplicates. |
-| **DB Failover** | Retry 5x → DLQ. | Circuit Breaker: Pause ingestion core if DLQ > 10% rate. |
-| **Out-of-Order** | Best-effort. | `last_seen_at` guard in SQL state upsert. |
-
+...
 Full Failure Analysis → [`docs/failover_analysis.md`](docs/failover_analysis.md)
 
 ---
@@ -109,40 +100,37 @@ Full Failure Analysis → [`docs/failover_analysis.md`](docs/failover_analysis.m
 
 ### 1. Requirements
 - Docker 24+ & Compose V2
-- `mosquitto_pub` (for simulation)
+- Python 3.12+ (for simulation)
 
 ### 2. Startup
 ```bash
-cp .env.example .env
-docker compose up -d
+# Build and start the entire stack
+docker compose up -d --build
 ```
 Wait ~30s for healthchecks. `docker compose ps` should show all services as `(healthy)`.
 
-### 3. Simulate High-Scale Event
+### 3. Simulate IoT Traffic
+We provide a professional simulation script that generates realistic telemetry for multiple devices.
 ```bash
-# Using remapped host port 11883
-docker exec iotflow-mosquitto mosquitto_pub -h localhost -p 1883 -t "devices/sensor-001/events" \
-  -m '{"event_id":"01HXYZABCDEFGHJKMNPQRSTVWX","device_id":"sensor-001","event_type":"temperature","timestamp":"2026-03-19T14:00:00Z","payload":{"value":22.5},"metadata":{"unit":"celsius"},"schema_version":"1.0"}'
+pip install paho-mqtt
+python3 scripts/simulate_iot.py
 ```
 
-### 4. Verify
-- **Log monitoring**: `docker compose logs -f worker`
-- **DB Check**: `docker exec iotflow-postgres psql -U iotflow -c "SELECT event_id, device_id, event_type, processed_at FROM events;"`
-- **Metrics**: 
+### 4. Verify results
+- **DB Check**: `docker exec iotflow-postgres psql -U iotflow -c "SELECT * FROM events ORDER BY processed_at DESC LIMIT 5;"`
+- **Dashboards**: 
     - **Grafana**: `http://localhost:13000` (User: `admin`, Pass: `admin`)
     - **Prometheus**: `http://localhost:19090`
-    - **FastAPI**: `http://localhost:18000`
+    - **Ingestion API**: `http://localhost:18000/docs`
 
 ---
 
-## 📖 System Design Deep-Dive
+## 📖 Technical Documentation
 
-Browse the core documentation for a deep-dive into each layer.
-
-- [**Design Decisions Audit**](docs/design_decisions.md): Detailed trade-offs and rationale.
-- [**High-Scale Upgrade**](docs/high_scale_upgrade.md): The math and architecture behind 100K msg/s.
+- [**System Design**](docs/system_design.md): Architectural deep-dive and mermaid diagrams.
+- [**Design Decisions**](docs/design_decisions.md): Trade-offs and Staff Engineer insights.
+- [**Capacity Planning**](docs/capacity_planning.md): Hardware sizing for 100K msg/s.
 - [**Failover Analysis**](docs/failover_analysis.md): 15 failure scenarios and mitigations.
-- [**Capacity Planning**](docs/capacity_planning.md): Hardware sizing and storage growth.
 - [**API & Data Model**](docs/api_design.md): Payloads, topics, and schemas.
 - [**Project Roadmap**](docs/ROADMAP.md): Future improvements & starter issues.
 

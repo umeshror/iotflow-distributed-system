@@ -1,20 +1,14 @@
-"""
-PostgreSQL async connection pool via asyncpg.
-
-Provides typed write operations used by the event processor.
-PgBouncer in transaction mode sits in front in production.
-"""
-
-from __future__ import annotations
-
+import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 import asyncpg
 
 from config import settings
 
-logger = logging.getLogger(__name__)
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 _pool: asyncpg.Pool | None = None
 
@@ -28,7 +22,7 @@ async def init_pool() -> None:
         command_timeout=settings.DB_COMMAND_TIMEOUT,
         server_settings={"application_name": settings.SERVICE_NAME},
     )
-    logger.info("DB connection pool created", extra={"pool_size": settings.DB_POOL_MAX_SIZE})
+    logger.info("DB connection pool created", pool_size=settings.DB_POOL_MAX_SIZE)
 
 
 async def close_pool() -> None:
@@ -58,10 +52,7 @@ async def insert_event(
 
     Returns True if a row was inserted, False if the event was a duplicate
     (ON CONFLICT DO NOTHING — relies on unique (event_id, ingested_at) PK).
-
-    Uses asyncpg's built-in JSON encoding for JSONB columns.
     """
-    import json
     pool = get_pool()
     result = await pool.execute(
         """
@@ -95,7 +86,6 @@ async def upsert_device_state(
     Upsert the materialised device latest-state row.
     Ensures the device exists in the 'devices' table first to satisfy FK.
     """
-    import json
     pool = get_pool()
     
     # 1. Ensure device exists (blind insert)
@@ -141,13 +131,13 @@ async def record_dlq_event(
         INSERT INTO dlq_events (
             event_id, device_id, original_topic, raw_payload,
             error_message, retry_count
-        ) VALUES ($1, $2, $3, $4::jsonb, $5, $6)
+        ) VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT DO NOTHING
         """,
         event_id,
         device_id,
         original_topic,
-        raw_payload,
+        json.dumps(raw_payload),
         error_message,
         retry_count,
     )

@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingestion
+  namespace: iotflow
+  labels:
+    app: ingestion
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ingestion
+  template:
+    metadata:
+      labels:
+        app: ingestion
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9100"
+    spec:
+      containers:
+      - name: ingestion
+        image: iotflow-ingestion:latest
+        ports:
+        - containerPort: 8000
+        - containerPort: 9100
+        envFrom:
+        - configMapRef:
+            name: iotflow-config
+        - secretRef:
+            name: iotflow-secrets
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "500m"
+            memory: "1Gi"
+        healthCheck:
+          httpGet:
+            path: /healthz
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingestion
+  namespace: iotflow
+spec:
+  selector:
+    app: ingestion
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8000
+  - name: metrics
+    port: 9100
+    targetPort: 9100
+  type: ClusterIP

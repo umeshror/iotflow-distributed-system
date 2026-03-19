@@ -23,7 +23,7 @@ To maintain a high level of code quality, we follow these standards:
 - **Validation**: Use Pydantic for all data validation and configuration.
 - **Logging**: Use `structlog` for structured, JSON-ready logging.
 - **Metrics**: Instrument new features with Prometheus metrics where appropriate.
-- **Tests**: Add unit tests for core logic in `services/shared` and integration tests for service components.
+- **Tests**: Add unit tests for core logic in `libs/shared` and integration tests for service components in `tests/`.
 
 ## Development Setup
 
@@ -35,11 +35,10 @@ git clone https://github.com/YOUR_USERNAME/Iot-flow.git
 cd Iot-flow
 
 # 2. Start the infrastructure
-cp .env.example .env
-docker compose up -d
+docker compose up -d --build
 
-# 3. Simulate events
-# Use the commands provided in the README.md to verify your changes.
+# 3. Simulate realistic events
+python3 scripts/simulate_iot.py
 ```
 
 ## Community

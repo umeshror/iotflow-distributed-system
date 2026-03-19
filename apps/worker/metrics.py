@@ -80,5 +80,7 @@ ACTIVE_TASKS = Gauge(
 )
 
 
+from libs.shared.metrics import start_shared_metrics_server
+
 def start_metrics_server() -> None:
-    start_http_server(settings.METRICS_PORT)
+    start_shared_metrics_server(settings.METRICS_PORT)

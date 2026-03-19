@@ -22,22 +22,8 @@ from metrics import start_metrics_server
 # ---------------------------------------------------------------------------
 # Structured logging
 # ---------------------------------------------------------------------------
-structlog.configure(
-    processors=[
-        structlog.contextvars.merge_contextvars,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.add_log_level,
-        structlog.processors.StackInfoRenderer(),
-        structlog.dev.ConsoleRenderer()
-        if settings.ENV == "development"
-        else structlog.processors.JSONRenderer(),
-    ],
-    wrapper_class=structlog.make_filtering_bound_logger(
-        logging.getLevelName(settings.LOG_LEVEL)
-    ),
-    logger_factory=structlog.PrintLoggerFactory(),
-)
-
+from libs.shared.logging import configure_logging
+configure_logging(settings.ENV, settings.LOG_LEVEL)
 log = structlog.get_logger()
 
 

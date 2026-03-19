@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
+import structlog
 import time
 from typing import Any
 
@@ -31,7 +31,7 @@ from metrics import CONSUMER_LAG, EVENTS_CONSUMED
 from processor import EventProcessor
 from retry import DLQPublisher
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # Semaphore limits in-flight DB writes (backpressure)
 _semaphore: asyncio.Semaphore | None = None
@@ -85,16 +85,14 @@ async def run_consumer_loop(
         await consumer.start()
         logger.info(
             "Kafka consumer started",
-            extra={
-                "topic": settings.KAFKA_TOPIC_RAW,
-                "group": settings.KAFKA_CONSUMER_GROUP,
-            },
+            topic=settings.KAFKA_TOPIC_RAW,
+            group=settings.KAFKA_CONSUMER_GROUP,
         )
         await _consume(consumer, processor)
     except asyncio.CancelledError:
         logger.info("Consumer loop cancelled")
     except KafkaError as exc:
-        logger.error("Fatal Kafka error", extra={"error": str(exc)})
+        logger.error("Fatal Kafka error", error=str(exc))
         raise
     finally:
         await consumer.stop()
@@ -155,10 +153,10 @@ class _RebalanceListener(ConsumerRebalanceListener):
     """Logs partition assignment changes during consumer group rebalances."""
 
     async def on_partitions_revoked(self, revoked: set[TopicPartition]) -> None:
-        logger.info("Partitions revoked", extra={"partitions": [str(p) for p in revoked]})
+        logger.info("Partitions revoked", partitions=[str(p) for p in revoked])
 
     async def on_partitions_assigned(self, assigned: set[TopicPartition]) -> None:
-        logger.info("Partitions assigned", extra={"partitions": [str(p) for p in assigned]})
+        logger.info("Partitions assigned", partitions=[str(p) for p in assigned])
 
 
 async def _maybe_sample_lag(consumer: AIOKafkaConsumer) -> None:
@@ -185,4 +183,4 @@ async def _maybe_sample_lag(consumer: AIOKafkaConsumer) -> None:
             lag = max(0, end_offset - committed_offset - 1)
             CONSUMER_LAG.labels(partition=str(tp.partition)).set(lag)
     except Exception as exc:
-        logger.debug("Lag sampling error (non-critical)", extra={"error": str(exc)})
+        logger.debug("Lag sampling error (non-critical)", error=str(exc))

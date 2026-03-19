@@ -5,53 +5,55 @@
 IoTFlow ingests events from millions of IoT devices over MQTT, streams them via Kafka, processes them asynchronously with stateless workers, enforces idempotency via Redis, and persists canonical device state and event history to PostgreSQL. A Dead Letter Queue (DLQ) captures all unprocessable events for offline analysis and replay.
 
 ```mermaid
+%%{init: {'theme': 'neutral', 'themeVariables': { 'mainBkg': '#f9f9f9', 'nodeBorder': '#333'}}}%%
 graph TB
-    subgraph Devices["IoT Devices (Millions)"]
-        D1[Sensor A]
-        D2[Sensor B]
-        D3[Gateway]
+    subgraph Devices["fa:fa-microchip IoT Edge (5M+ Sensors)"]
+        D1[fa:fa-broadcast-tower Device A]
+        D2[fa:fa-broadcast-tower Device B]
     end
 
-    subgraph Ingestion["Ingestion Layer"]
-        MB[MQTT Broker\nMosquitto / EMQ X]
-        IS[Ingestion Service\nFastAPI + aiomqtt]
+    subgraph apps["fa:fa-cubes apps/ (Services)"]
+        direction TB
+        subgraph IS["fa:fa-server Ingestion Service (FastAPI)"]
+            direction LR
+            P1[fa:fa-search Validate] --> P2[fa:fa-shield-halved Rate Limit] --> P3[fa:fa-share-nodes Kafka Produce]
+        end
+        
+        subgraph WS["fa:fa-gears Worker Service (asyncio)"]
+            direction LR
+            H1[fa:fa-fingerprint Idempotency] --> H2[fa:fa-database Persist] --> H3[fa:fa-chart-line Update State]
+        end
     end
 
-    subgraph Streaming["Streaming Layer"]
-        K[Kafka Cluster\n3+ Brokers]
-        KT_RAW[Topic: iot.events.raw]
-        KT_VALID[Topic: iot.events.validated]
-        KT_DLQ[Topic: iot.events.dlq]
+    subgraph libs["fa:fa-book-open libs/ (Shared Bundles)"]
+        SharedP[fa:fa-code Pipeline Core]
+        SharedM[fa:fa-table IoTEvent Models]
     end
 
-    subgraph Processing["Processing Layer"]
-        W1[Worker Pod 1]
-        W2[Worker Pod 2]
-        WN[Worker Pod N]
+    subgraph infra["fa:fa-network-wired infra/ (Distributed Foundation)"]
+        K2[fa:fa-vial Kafka Cluster\n3-Node / KRaft]
+        PG[fa:fa-database PostgreSQL\nPartitioned History]
+        RC[fa:fa-bolt Redis Cluster\nDedup Cache]
+        DLQ[fa:fa-trash-can Kafka DLQ\nPoison Events]
     end
 
-    subgraph State["State & Cache"]
-        R[Redis Cluster\nIdempotency + Rate Limit]
-        PG[PostgreSQL\nPrimary + Replica]
-    end
+    D1 & D2 -- "fa:fa-wifi MQTT QoS1" --> IS
+    IS -- "iot.events.raw" --> K2
+    K2 -- "Batch Consume" --> WS
+    WS -- "Commit" --> infra
+    WS -. "Error Fallback" .-> DLQ
 
-    subgraph Observability["Observability"]
-        PROM[Prometheus]
-        GRAF[Grafana]
-        LOKI[Loki / ELK]
-    end
+    %% Internal Library Dependencies
+    IS & WS -. "import" .-> libs
 
-    D1 & D2 & D3 -->|MQTT TLS| MB
-    MB -->|subscribe| IS
-    IS -->|validate + produce| KT_RAW
-    KT_RAW --> W1 & W2 & WN
-    W1 & W2 & WN -->|idempotency check| R
-    W1 & W2 & WN -->|persist| PG
-    W1 & W2 & WN -->|failed events| KT_DLQ
-    W1 & W2 & WN -->|emit metrics| PROM
-    IS -->|emit metrics| PROM
-    PROM --> GRAF
-    IS & W1 -->|structured logs| LOKI
+    %% Styling
+    style IS fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style WS fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style libs fill:#f3e5f5,stroke:#4a148c,stroke-dasharray: 5 5
+    style infra fill:#f1f8e9,stroke:#1b5e20,stroke-width:2px
+    style K2 fill:#fff,stroke:#333
+    style PG fill:#fff,stroke:#333
+    style RC fill:#fff,stroke:#333
 ```
 
 ---
@@ -142,72 +144,79 @@ graph TB
 
 ```mermaid
 sequenceDiagram
-    participant D as IoT Device
-    participant MB as MQTT Broker
-    participant IS as Ingestion Service
-    participant R as Redis
-    participant K as Kafka
-    participant W as Worker
-    participant PG as PostgreSQL
+    autonumber
+    participant D as fa:fa-microchip IoT Device
+    participant MB as fa:fa-server MQTT Broker
+    participant IS as fa:fa-gears Ingestion Service
+    participant R as fa:fa-bolt Redis
+    participant K as fa:fa-vial Kafka
+    participant W as fa:fa-gears Worker
+    participant PG as fa:fa-database PostgreSQL
 
-    D->>MB: PUBLISH /devices/{id}/events (QoS 1)
+    D->>MB: PUBLISH /events (QoS 1)
     MB-->>D: PUBACK
-    MB->>IS: Forward message (aiomqtt subscription)
-    IS->>IS: Validate JSON Schema
-    IS->>R: INCR rate_limit:{device_id} / check threshold
-    R-->>IS: OK (within limit)
-    IS->>K: produce(topic=iot.events.raw, key=device_id)
+    MB->>IS: Forward message
+    IS->>IS: IngestionPipeline (Validate -> RateLimit)
+    IS->>R: Atomic Rate Check
+    R-->>IS: OK
+    IS->>K: Produce (iot.events.raw)
     K-->>IS: ACK (acks=all)
-    K->>W: consume(iot.events.raw)
-    W->>R: SET NX EX 72h iot:idempotency:{event_id}
-    R-->>W: OK (not seen before)
-    W->>PG: INSERT INTO events (...) ON CONFLICT DO NOTHING
+    K->>W: Batch Consume
+    W->>W: WorkerPipeline (Idempotency -> Persist)
+    W->>R: SET NX EX 72h (Dedup)
+    R-->>W: OK (New)
+    W->>PG: UPSERT Event + State
     PG-->>W: OK
-    W->>K: manual commit offset
+    W->>K: Manual Commit
 ```
 
 ### 3.2 Retry + DLQ Flow
 
 ```mermaid
 sequenceDiagram
-    participant K as Kafka
-    participant W as Worker
-    participant R as Redis
-    participant PG as PostgreSQL
-    participant DLQ as DLQ Topic
+    autonumber
+    participant K as fa:fa-vial Kafka
+    participant W as fa:fa-gears Worker
+    participant R as fa:fa-bolt Redis
+    participant PG as fa:fa-database PostgreSQL
+    participant DLQ as fa:fa-trash-can DLQ Topic
 
-    K->>W: consume event
-    W->>PG: INSERT → FAIL (DB down)
-    W->>W: backoff(attempt=1, delay=1s)
-    W->>PG: retry → FAIL
-    W->>W: backoff(attempt=2, delay=2s)
-    W->>PG: retry → FAIL
-    W->>W: backoff(attempt=3, delay=4s)
-    W->>PG: retry → FAIL
-    W->>W: backoff(attempt=4, delay=8s)
-    W->>PG: retry → FAIL (attempt 5)
-    W->>DLQ: produce(iot.events.dlq, {payload, error, attempts=5})
-    W->>K: commit offset (do not block pipeline)
+    K->>W: Consume Event
+    W->>PG: INSERT (Attempt 1)
+    PG--xW: 503 Service Unavailable
+    W->>W: Exponential Backoff (1s...)
+    W->>PG: INSERT (Attempt 2)
+    PG--xW: 503 Service Unavailable
+    W->>W: ...Backoff (8s)
+    W->>PG: INSERT (Attempt 5 - Final)
+    PG--xW: 503 Service Unavailable
+    W->>R: Release Idempotency Key
+    R-->>W: OK
+    W->>DLQ: Publish Poison Message
+    DLQ-->>W: ACK
+    W->>K: Commit Offset
 ```
 
 ### 3.3 Idempotency — Duplicate Detection
 
 ```mermaid
 sequenceDiagram
-    participant W as Worker
-    participant R as Redis
-    participant PG as PostgreSQL
+    autonumber
+    participant W as fa:fa-gears Worker
+    participant R as fa:fa-bolt Redis
+    participant PG as fa:fa-database PostgreSQL
 
-    note over W: Event received (possibly duplicate due to QoS 1 re-delivery)
-    W->>R: SET NX EX 259200 iot:idempotency:{event_id}
-    alt Not seen before
-        R-->>W: 1 (key set)
-        W->>PG: INSERT event
-    else Already processed
-        R-->>W: 0 (key exists)
-        W->>W: discard — log as duplicate
-        W->>K: commit offset
+    Note over W: Event received (QoS 1 Re-delivery)
+    W->>R: SET NX EX 72h (idempotency:{id})
+    alt Event is New
+        R-->>W: 1 (Success)
+        W->>PG: INSERT Event
+        PG-->>W: OK
+    else Event is Duplicate
+        R-->>W: 0 (Exists)
+        W->>W: Discard (Log Duplicate)
     end
+    W->>K: Commit Offset
 ```
 
 ---

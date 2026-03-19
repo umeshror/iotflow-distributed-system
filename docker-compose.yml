@@ -9,7 +9,7 @@ services:
       - "11883:1883"
       - "19001:9001"  # WebSocket
     volumes:
-      - ./config/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
     healthcheck:
@@ -105,7 +105,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-iotflow_secret}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./migrations/001_initial.sql:/docker-entrypoint-initdb.d/001_initial.sql:ro
+      - ./infra/db/migrations/001_initial.sql:/docker-entrypoint-initdb.d/001_initial.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U iotflow -d iotflow"]
       interval: 10s
@@ -121,7 +121,7 @@ services:
   ingestion:
     build:
       context: .
-      dockerfile: services/ingestion/Dockerfile
+      dockerfile: apps/ingestion/Dockerfile
     container_name: iotflow-ingestion
     ports:
       - "18000:8000"   # FastAPI
@@ -149,7 +149,7 @@ services:
   worker:
     build:
       context: .
-      dockerfile: services/worker/Dockerfile
+      dockerfile: apps/worker/Dockerfile
     container_name: iotflow-worker
     ports:
       - "19101:9101"   # Prometheus metrics
@@ -182,7 +182,7 @@ services:
     ports:
       - "19090:9090"
     volumes:
-      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
@@ -202,7 +202,7 @@ services:
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/iotflow.json
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
       - prometheus
     networks:

@@ -42,26 +42,20 @@ from metrics import (
     start_metrics_server,
 )
 from rate_limiter import RateLimiter
+from handlers import (
+    IngestionContext,
+    LoggingHandler,
+    ValidationHandler,
+    RateLimitHandler,
+    KafkaPublishHandler,
+)
+from libs.shared.pipeline import Pipeline
 
 # ---------------------------------------------------------------------------
 # Structured logging setup (JSON in production, pretty in dev)
 # ---------------------------------------------------------------------------
-structlog.configure(
-    processors=[
-        structlog.contextvars.merge_contextvars,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.add_log_level,
-        structlog.processors.StackInfoRenderer(),
-        structlog.dev.ConsoleRenderer()
-        if settings.ENV == "development"
-        else structlog.processors.JSONRenderer(),
-    ],
-    wrapper_class=structlog.make_filtering_bound_logger(
-        logging.getLevelName(settings.LOG_LEVEL)
-    ),
-    logger_factory=structlog.PrintLoggerFactory(),
-)
-
+from libs.shared.logging import configure_logging
+configure_logging(settings.ENV, settings.LOG_LEVEL)
 log = structlog.get_logger()
 
 # ---------------------------------------------------------------------------
@@ -75,6 +69,7 @@ _MSG_QUEUE: asyncio.Queue[dict] = asyncio.Queue(maxsize=10_000)
 kafka_producer: KafkaProducerClient | None = None
 redis_client: aioredis.Redis | None = None
 rate_limiter: RateLimiter | None = None
+_pipeline: Pipeline[IngestionContext] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -92,11 +87,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     kafka_producer = KafkaProducerClient()
     await kafka_producer.start()
 
-    # Redis
     redis_client = aioredis.from_url(
         settings.REDIS_URL, encoding="utf-8", decode_responses=True
     )
     rate_limiter = RateLimiter(redis_client)
+
+    # Initialize Processing Pipeline
+    global _pipeline
+    _pipeline = Pipeline[IngestionContext]()
+    _pipeline.use(LoggingHandler())
+    _pipeline.use(ValidationHandler())
+    _pipeline.use(RateLimitHandler(rate_limiter))
+    _pipeline.use(KafkaPublishHandler(kafka_producer))
 
     # Background tasks
     mqtt_task = asyncio.create_task(_mqtt_subscriber_loop(), name="mqtt-subscriber")
@@ -232,7 +234,7 @@ async def _message_dispatcher() -> None:
     Consumes messages from the internal queue.
     Validates schema → checks rate limit → produces to Kafka.
     """
-    from services.shared.models import IoTEvent  # relative import
+    from libs.shared.models import IoTEvent  # relative import
 
     while True:
         try:
@@ -248,67 +250,9 @@ async def _message_dispatcher() -> None:
 
 async def _process_mqtt_message(msg: dict, IoTEvent: type) -> None:
     """Validate, rate-limit, and produce a single MQTT message to Kafka."""
-    topic: str = msg["topic"]
-
-    # Extract device_id from topic: "devices/{device_id}/events"
-    parts = topic.split("/")
-    device_id = parts[1] if len(parts) >= 2 else "unknown"
-
-    # Parse payload
-    try:
-        raw = json.loads(msg["payload"])
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        EVENTS_DROPPED.labels(reason="invalid_json").inc()
-        log.warning("Invalid JSON payload", device_id=device_id, error=str(exc))
-        return
-
-    EVENTS_RECEIVED.labels(
-        device_id=device_id, event_type=raw.get("event_type", "unknown")
-    ).inc()
-
-    # Schema validation (Pydantic)
-    with VALIDATION_LATENCY.time():
-        try:
-            event = IoTEvent(**raw)
-        except ValidationError as exc:
-            EVENTS_DROPPED.labels(reason="schema_error").inc()
-            log.warning(
-                "Schema validation failed",
-                device_id=device_id,
-                errors=exc.errors(),
-            )
-            return
-
-    # Rate limiting
-    assert rate_limiter is not None
-    if not await rate_limiter.is_allowed(event.device_id):
-        EVENTS_DROPPED.labels(reason="rate_limited").inc()
-        log.warning("Rate limit exceeded", device_id=event.device_id)
-        return
-
-    EVENTS_VALIDATED.inc()
-
-    # Produce to Kafka (key = device_id for partition affinity)
-    assert kafka_producer is not None
-    try:
-        await kafka_producer.produce(
-            topic=settings.KAFKA_TOPIC_RAW,
-            value=event.to_kafka_dict(),
-            key=event.device_id,
-        )
-        log.debug(
-            "Event produced to Kafka",
-            event_id=event.event_id,
-            device_id=event.device_id,
-            topic=settings.KAFKA_TOPIC_RAW,
-        )
-    except Exception as exc:
-        EVENTS_DROPPED.labels(reason="kafka_error").inc()
-        log.error(
-            "Failed to produce event to Kafka",
-            event_id=event.event_id,
-            error=str(exc),
-        )
+    assert _pipeline is not None
+    context = IngestionContext(raw_message=msg)
+    await _pipeline.execute(context)
 
 
 async def _queue_gauge_updater() -> None:

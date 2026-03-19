@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import random
 import time
 import uuid
+import structlog
 from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, Callable
@@ -26,7 +26,7 @@ from aiokafka.errors import KafkaError
 from config import settings
 from metrics import EVENTS_DLQ, RETRY_ATTEMPTS
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Non-retryable exception types — these go directly to DLQ
@@ -68,7 +68,8 @@ async def with_retry(coro_fn: Callable, *args: Any, **kwargs: Any) -> Any:
         except NON_RETRYABLE_ERRORS as exc:
             logger.warning(
                 "Non-retryable error — sending to DLQ",
-                extra={"attempt": attempt, "error": str(exc)},
+                attempt=attempt,
+                error=str(exc),
             )
             raise
         except Exception as exc:
@@ -78,17 +79,16 @@ async def with_retry(coro_fn: Callable, *args: Any, **kwargs: Any) -> Any:
                 delay = _compute_delay(attempt)
                 logger.warning(
                     f"Transient error: {exc} — retrying",
-                    extra={
-                        "attempt": attempt,
-                        "max_attempts": settings.RETRY_MAX_ATTEMPTS,
-                        "delay_seconds": round(delay, 2),
-                    },
+                    attempt=attempt,
+                    max_attempts=settings.RETRY_MAX_ATTEMPTS,
+                    delay_seconds=round(delay, 2),
                 )
                 await asyncio.sleep(delay)
             else:
                 logger.error(
                     "All retry attempts exhausted",
-                    extra={"attempts": settings.RETRY_MAX_ATTEMPTS, "error": str(exc)},
+                    attempts=settings.RETRY_MAX_ATTEMPTS,
+                    error=str(exc),
                 )
 
     assert last_exc is not None
@@ -149,16 +149,15 @@ class DLQPublisher:
             )
             logger.info(
                 "Event sent to DLQ",
-                extra={
-                    "event_id": event_id,
-                    "error_type": error_type,
-                    "retry_count": retry_count,
-                },
+                event_id=event_id,
+                error_type=error_type,
+                retry_count=retry_count,
             )
         except KafkaError as exc:
             logger.error(
                 "CRITICAL: Failed to publish to DLQ topic",
-                extra={"event_id": event_id, "error": str(exc)},
+                event_id=event_id,
+                error=str(exc),
             )
 
         # Persist to PostgreSQL for audit
@@ -174,5 +173,6 @@ class DLQPublisher:
         except Exception as exc:
             logger.error(
                 "Failed to persist DLQ record to PostgreSQL",
-                extra={"event_id": event_id, "error": str(exc)},
+                event_id=event_id,
+                error=str(exc),
             )

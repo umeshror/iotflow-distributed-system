@@ -62,6 +62,7 @@ QUEUE_SIZE = Gauge(
 )
 
 
+from libs.shared.metrics import start_shared_metrics_server
+
 def start_metrics_server() -> None:
-    """Start Prometheus HTTP metrics server on configured port."""
-    start_http_server(settings.METRICS_PORT)
+    start_shared_metrics_server(settings.METRICS_PORT)

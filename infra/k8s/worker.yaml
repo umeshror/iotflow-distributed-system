@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: iotflow
+  labels:
+    app: worker
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9101"
+    spec:
+      containers:
+      - name: worker
+        image: iotflow-worker:latest
+        ports:
+        - containerPort: 9101
+        envFrom:
+        - configMapRef:
+            name: iotflow-config
+        - secretRef:
+            name: iotflow-secrets
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "1000m"
+            memory: "2Gi"
+        healthCheck:
+          httpGet:
+            path: /metrics
+            port: 9101
+          initialDelaySeconds: 20
+          periodSeconds: 15
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: worker-hpa
+  namespace: iotflow
+spec:
+  scaleTargetRef:
+    api_version: apps/v1
+    kind: Deployment
+    name: worker
+  minReplicas: 5
+  maxReplicas: 50
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70

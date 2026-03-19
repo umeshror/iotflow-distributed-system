@@ -8,13 +8,13 @@ Degrades gracefully on Redis failure (logs warning, allows the event through).
 
 from __future__ import annotations
 
-import logging
+import structlog
 
 import redis.asyncio as aioredis
 
 from config import settings
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Lua script: atomic INCR + EXPIRE in a single round-trip.
@@ -55,6 +55,7 @@ class RateLimiter:
         except Exception as exc:  # Redis unavailable
             logger.warning(
                 "Redis rate limiter unavailable — allowing event through",
-                extra={"device_id": device_id, "error": str(exc)},
+                device_id=device_id,
+                error=str(exc),
             )
             return True  # fail-open: prefer availability over strict rate limiting

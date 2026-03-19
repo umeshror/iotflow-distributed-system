@@ -6,18 +6,21 @@ RUN addgroup --system iotflow && adduser --system --ingroup iotflow iotflow
 WORKDIR /app
 
 # Install dependencies in a separate layer
-COPY services/ingestion/requirements.txt ./
+COPY apps/ingestion/requirements.txt ./
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-# Copy shared models
-COPY services/shared /app/services/shared
+# Copy shared libraries
+COPY libs /app/libs
 
 # Copy service source
-COPY services/ingestion /app
+COPY apps/ingestion /app
 
 RUN chown -R iotflow:iotflow /app
 USER iotflow
+
+# Set PYTHONPATH to include the root of the app so libs can be imported
+ENV PYTHONPATH=/app
 
 # Prometheus metrics on 9100, FastAPI on 8000
 EXPOSE 8000 9100

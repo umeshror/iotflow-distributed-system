@@ -22,16 +22,16 @@ Throughput math:
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any
 
+import structlog
 from aiokafka import AIOKafkaProducer
 from aiokafka.errors import KafkaError
 
 from config import settings
 from metrics import KAFKA_PRODUCE_ERRORS, KAFKA_PRODUCE_LATENCY
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class KafkaProducerClient:
@@ -54,7 +54,7 @@ class KafkaProducerClient:
             enable_idempotence=True,
         )
         await self._producer.start()
-        logger.info("Kafka producer started", extra={"servers": settings.KAFKA_BOOTSTRAP_SERVERS})
+        logger.info("Kafka producer started", servers=settings.KAFKA_BOOTSTRAP_SERVERS)
 
     async def stop(self) -> None:
         if self._producer:
@@ -86,7 +86,9 @@ class KafkaProducerClient:
                 KAFKA_PRODUCE_ERRORS.labels(error_type=error_type).inc()
                 logger.error(
                     "Kafka produce failed",
-                    extra={"topic": topic, "key": key, "error": str(exc)},
+                    topic=topic,
+                    key=key,
+                    error=str(exc),
                 )
                 raise
 
@@ -131,6 +133,7 @@ class KafkaProducerClient:
                 KAFKA_PRODUCE_ERRORS.labels(error_type=error_type).inc()
                 logger.error(
                     "Kafka batch produce failed",
-                    extra={"batch_size": len(messages), "error": str(exc)},
+                    batch_size=len(messages),
+                    error=str(exc),
                 )
                 raise

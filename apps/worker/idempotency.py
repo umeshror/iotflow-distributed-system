@@ -12,14 +12,13 @@ v2 changes:
 
 from __future__ import annotations
 
-import logging
-
+import structlog
 import redis.asyncio as aioredis
 
 from config import settings
 from metrics import EVENTS_DUPLICATE, IDEMPOTENCY_CHECK_LATENCY
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class IdempotencyGuard:
@@ -55,13 +54,14 @@ class IdempotencyGuard:
                 if result is None:
                     # Key already existed — duplicate
                     EVENTS_DUPLICATE.inc()
-                    logger.debug("Duplicate event detected", extra={"event_id": event_id})
+                    logger.debug("Duplicate event detected", event_id=event_id)
                     return False
                 return True
             except Exception as exc:
                 logger.warning(
                     "Redis idempotency check failed — falling through to DB",
-                    extra={"event_id": event_id, "error": str(exc)},
+                    event_id=event_id,
+                    error=str(exc),
                 )
                 return True  # fail-open
 
@@ -101,7 +101,7 @@ class IdempotencyGuard:
                         EVENTS_DUPLICATE.inc()
                         logger.debug(
                             "Duplicate event detected (batch)",
-                            extra={"event_id": event_id},
+                            event_id=event_id,
                         )
                         outcomes.append(False)
                     else:
@@ -110,7 +110,8 @@ class IdempotencyGuard:
             except Exception as exc:
                 logger.warning(
                     "Redis batch idempotency check failed — fail-open for entire batch",
-                    extra={"batch_size": len(event_ids), "error": str(exc)},
+                    batch_size=len(event_ids),
+                    error=str(exc),
                 )
                 return [True] * len(event_ids)  # fail-open
 
