@@ -168,14 +168,14 @@ python3 scripts/simulate_iot.py
 
 - [**Strategic Roadmap**](docs/STRATEGIC_ISSUES.md): High-impact issues showcasing system design maturity.
 - [**System Design**](docs/system_design.md): Architectural deep-dive and mermaid diagrams.
-- [**Design Decisions**](docs/design_decisions.md): Trade-offs and Staff Engineer insights.
+- [**Design Decisions**](docs/design_decisions.md): Trade-offs 
 - [**Capacity Planning**](docs/capacity_planning.md): Hardware sizing for 100K msg/s.
 - [**Failover Analysis**](docs/failover_analysis.md): 15 failure scenarios and mitigations.
 - [**API & Data Model**](docs/api_design.md): Payloads, topics, and schemas.
 
 ---
 
-## 🧠 Staff Engineer Insights
+## 🧠 Insights
 
 > "In a distributed IoT system, **availability is a choice.**"
 
