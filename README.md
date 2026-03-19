@@ -9,14 +9,16 @@
 
 ---
 
-## 🚀 The Reliability Paradox in IoT
+## 🚀 The Reliability Paradox in Industrial IoT
 
-In industrial IoT (factories, energy grids, logistics), devices operate in "harsh" network environments. Connections are intermittent, but the data is mission-critical. A 10ms temperature spike or a pressure drop in a gas pipeline cannot be missed, duplicated, or processed out of order.
+In mission-critical IoT environments—energy grids, automated factories, and autonomous logistics—**network reliability is a luxury, not a guarantee.** 
 
-**IoTFlow** is a distributed event backbone that solves the three core challenges of IoT at scale:
-1.  **Ingestion Reliability**: Handling millions of concurrent MQTT connections with backpressure.
-2.  **Data Integrity**: Guaranteeing "at-least-once" delivery with "exactly-once" processing (idempotency).
-3.  **Operational Resilience**: Surviving partial infrastructure failures (Kafka/DB/Redis) without data loss.
+Most IoT platforms fail when the "happy path" ends. A 50ms jitter or a database lock-wait can result in:
+- **Missing Telemetry**: Losing a critical pressure-drop signal.
+- **Duplicate Commands**: Re-firing an "Open Valve" instruction due to QoS 1 retries.
+- **Head-of-Line Blocking**: One slow device slowing down the entire ingestion pipeline.
+
+**IoTFlow** is not just an ingestion engine; it is a **Reference Architecture for High-Availability Event Pipelines.** It treats "Failure as a First-Class Citizen," providing a battle-tested blueprint for handling 100K+ msg/s in the face of intermittent connectivity and infrastructure outages.
 
 ---
 
@@ -127,12 +129,20 @@ python3 scripts/simulate_iot.py
 
 ## 📖 Technical Documentation
 
+- [**Strategic Roadmap**](docs/STRATEGIC_ISSUES.md): High-impact issues showcasing system design maturity.
 - [**System Design**](docs/system_design.md): Architectural deep-dive and mermaid diagrams.
 - [**Design Decisions**](docs/design_decisions.md): Trade-offs and Staff Engineer insights.
 - [**Capacity Planning**](docs/capacity_planning.md): Hardware sizing for 100K msg/s.
 - [**Failover Analysis**](docs/failover_analysis.md): 15 failure scenarios and mitigations.
 - [**API & Data Model**](docs/api_design.md): Payloads, topics, and schemas.
-- [**Project Roadmap**](docs/ROADMAP.md): Future improvements & starter issues.
+
+---
+
+## 🧠 Staff Engineer Insights
+
+> "In a distributed IoT system, **availability is a choice.**"
+
+IoTFlow is designed with the philosophy that infrastructure *will* fail. Our "Clean Architecture" pipeline ensures that transport failures (MQTT) never corrupt our core state (PostgreSQL), and our Kafka-centered log allows for offline recovery through the DLQ. We prioritize **Idempotency at the Sink** over **Transactional Produce at the Source** to maximize throughput without sacrificing data integrity.
 
 ---
 
