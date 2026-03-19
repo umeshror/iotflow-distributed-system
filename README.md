@@ -1,7 +1,9 @@
 # IoTFlow: Scalable Reference Architecture for IoT Event Pipelines
 
-> **A production-grade distributed system designed for unreliable IoT environments.**
-> Built for **100K+ events/sec** with strong idempotency, failure handling, and multi-AZ resilience.
+> **IoT environments are unreliable — devices disconnect, messages duplicate, and networks fail.**
+> **IoTFlow is a distributed event processing system designed to handle these challenges with fault-tolerant ingestion, retry mechanisms, and scalable streaming.**
+
+---
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-green.svg)](https://www.python.org/)
@@ -26,7 +28,19 @@ Most IoT platforms fail when the "happy path" ends. A 50ms jitter or a database 
 
 IoTFlow implements a **Clean Architecture** with a middleware-inspired **Processing Pipeline**. This decouples transport-specific logic (MQTT, Kafka) from core business logic (Idempotency, State Persistence).
 
+### **High-Level Flow**
 ```mermaid
+graph TD
+    A[Devices] --> B[MQTT Broker]
+    B --> C[Ingestion Service]
+    C --> D[Kafka]
+    D --> E[Workers]
+    E --> F[Postgres]
+    E --> G[Redis]
+    E --> H[Dead Letter Queue]
+```
+
+### **Detailed Component View**
 %%{init: {'theme': 'neutral', 'themeVariables': { 'mainBkg': '#f9f9f9', 'nodeBorder': '#333'}}}%%
 graph TB
     subgraph Devices["fa:fa-microchip IoT Edge (5M+ Sensors)"]
@@ -86,15 +100,26 @@ graph TB
 
 ---
 
-## 📈 Capacity & Scaling (v2)
-...
-Full Capacity Planning → [`docs/capacity_planning.md`](docs/capacity_planning.md)
+## 📈 Scale (FAANG Signal)
+
+- **500K devices** supported
+- **50K events/sec peak** throughput
+- **Designed for burst traffic** (2x peak capacity)
+- Linear horizontal scaling across all tiers
+
+Full Scale Strategy → [`docs/scaling.md`](docs/scaling.md)
 
 ---
 
-## 🛡️ Failure Handling & Audit
-...
-Full Failure Analysis → [`docs/failover_analysis.md`](docs/failover_analysis.md)
+## 🛡️ Failure Handling (Staff-Level Resilience)
+
+- **Duplicate messages** → handled via Redis idempotency  
+- **Failed processing** → retried with exponential backoff  
+- **Persistent failures** → routed to Dead Letter Queue  
+- **Kafka downtime** → ingestion buffering  
+- **DB failure** → retry from queue  
+
+Full Failure Analysis → [`docs/failures.md`](docs/failures.md)
 
 ---
 
