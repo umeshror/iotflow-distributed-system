@@ -1,9 +1,9 @@
-# IoTFlow — Distributed IoT Event Processing System
+# IoTFlow — Distributed Event Processing for Unreliable Environments
 
-> **IoT environments are unreliable — devices disconnect, messages duplicate, and networks fail.**
-> IoTFlow is a **high-scale distributed event processing system** designed to handle these challenges with fault-tolerant ingestion, retry mechanisms, and scalable streaming.
+> **IoT environments are inherently unreliable — devices disconnect, messages duplicate, and networks fail.**
+> IoTFlow is a **high-throughput, fault-tolerant reference architecture** designed to handle 50,000+ events/sec with linear scalability and effectively-once processing guarantees.
 
-> ⚡ This project is a **system design case study and production-grade reference architecture**, not just a demo.
+> ⚡ This project serves as a **production-grade system design case study** for building resilient distributed pipelines using Clean Architecture and Event Streaming.
 
 ---
 
@@ -13,310 +13,147 @@
 
 ---
 
-# 🚀 The Reliability Problem in IoT
+# 🚀 The Challenge: Reliability at Scale
 
-In industrial IoT systems (energy, manufacturing, logistics), failures are inevitable:
+In industrial IoT (energy, manufacturing, autonomous logistics), "Happy Path" engineering fails. Network jitter, database locks, and QoS 1 retries result in:
+- **Telemetry Gaps**: Critical signals lost during transient outages.
+- **Double-Counting**: Duplicate command execution due to broker retries.
+- **Head-of-Line Blocking**: One slow consumer stalling the entire pipeline.
 
-* Devices disconnect unpredictably
-* Messages are duplicated (QoS retries)
-* Events arrive out-of-order
-* Infrastructure components fail independently
-
-👉 IoTFlow is designed to **embrace failure**, not ignore it.
+**IoTFlow minimizes blast radius** by treating failure as a first-class citizen.
 
 ---
 
-# 🏗️ Architecture Overview
+# 🏗️ Architecture Philosophy
+
+IoTFlow implements a **Clean Architecture** processing pipeline. By decoupling transport-specific logic (MQTT/Kafka) from core business logic (Idempotency/Persistence), we ensure the system is:
+1. **Mockable**: Core handlers are tested without any real infrastructure.
+2. **Pluggable**: Switch from Kafka to Pulsar or NATS by changing a single handler.
+3. **Traceable**: A global **Trace ID** or Correlation ID is injected at the edge and propagated across every service.
 
 ## High-Level Flow
 
-```mermaid id="p8f0cl"
+```mermaid
 graph TD
-    A[Devices] --> B[MQTT Broker Cluster]
-    B --> C[Ingestion Service]
-    C --> D[Kafka Cluster]
-    D --> E[Worker Services]
-    E --> F[Postgres]
-    E --> G[Redis Cluster]
-    E --> H[Dead Letter Queue]
+    A["fa:fa-microchip Devices"] --> B["fa:fa-network-wired MQTT Broker"]
+    B --> C["fa:fa-server Ingestion Service"]
+    C --> D["fa:fa-share-nodes Kafka (Log)"]
+    D --> E["fa:fa-gears Workers"]
+    E --> F["fa:fa-database Postgres (Sink)"]
+    E --> G["fa:fa-bolt Redis (Dedup)"]
+    E --> H["fa:fa-trash-can DLQ"]
 ```
 
 ---
 
-## Detailed Component View
+# 📊 Design for Scale (500K Devices)
 
-```mermaid id="mx0blb"
-graph TB
-    subgraph Devices["IoT Edge (500K+ Devices)"]
-        D1[Device A]
-        D2[Device B]
-    end
+### Target Metrics
+- **Throughput**: 50,000 events/sec (Peak) / 100,000 events/sec (Burst).
+- **Latency**: < 200ms p95 end-to-end processing time.
+- **Data Volume**: ~4 TB/day ingestion.
 
-    subgraph Ingestion["Ingestion Service"]
-        V[Validate] --> RL[Rate Limit] --> BP[Backpressure] --> KP[Kafka Produce]
-    end
-
-    subgraph Workers["Worker Service"]
-        IDEMP[Idempotency] --> RETRY[Retry Logic] --> DBP[Persist] --> STATE[State Update]
-    end
-
-    subgraph Infra["Infrastructure"]
-        KAFKA[Kafka Cluster]
-        REDIS[Redis Cluster]
-        DB[Postgres]
-        DLQ[Dead Letter Queue]
-    end
-
-    D1 --> B
-    D2 --> B
-    B --> Ingestion
-    Ingestion --> KAFKA
-    KAFKA --> Workers
-    Workers --> DB
-    Workers --> REDIS
-    Workers --> DLQ
-```
+### Capacity Justification
+- **Kafka Strategy**: 200 partitions for 100 parallel consumers, ensuring sub-second lag.
+- **Redis Dedup**: 2GB memory allows for a **24-hour idempotency window** for 100% of devices.
+- **Database Partitioning**: PostgreSQL uses time-series partitioning to maintain fast index-lookups even with 1B+ records.
 
 ---
 
-# 📊 Scale & Capacity Planning
+# 🛡️ Operational Reliability (Chaos Proof)
 
-## Target Scale
-
-* **500K devices**
-* **50K events/sec peak**
-* **Supports burst up to 100K events/sec**
-* **1KB payload (~50 MB/sec ingestion)**
-* **~4 TB/day data volume**
-
----
-
-## Capacity Justification
-
-* Kafka partitions: **200**
-* Consumer workers: **100**
-* Batch size: **500 events**
-* Redis memory: **~2GB (24h idempotency window)**
-* Postgres: **~10K writes/sec (batched)**
-
-👉 Guarantees:
-
-* <200ms processing latency
-* Linear scalability
-* Burst tolerance
+| Potential Failure | Mitigation Strategy | Engineering Logic |
+| :--- | :--- | :--- |
+| **Broker Duplicates** | Redis ID Map | Ensures "Effectively-Once" across retries. |
+| **Consumer Lag** | HPA + Auto-Scaling | Kafka partitions permit horizontal expansion. |
+| **Poison Messages** | Dead Letter Queue | Isolates bad payloads without blocking the queue. |
+| **Downstream Outage** | Exponential Backoff | Jittered retries prevent thundering herd on recovery. |
+| **Infrastructure Split** | Kafka Persistence | Kafka acts as a safety buffer for up to 7 days. |
 
 ---
 
-# 🛡️ Failure Handling
+# 🔁 The Event Lifecycle
 
-| Failure             | Strategy                      |
-| ------------------- | ----------------------------- |
-| Duplicate messages  | Redis idempotency             |
-| Out-of-order events | Timestamp + processing window |
-| Processing failures | Exponential retry with jitter |
-| Poison messages     | DLQ                           |
-| Kafka downtime      | Buffer + retry                |
-| DB downtime         | Retry from Kafka              |
-| Consumer crash      | Rebalance + replay            |
-
-👉 See `docs/failures.md`
-
----
-
-# 🔁 Event Processing Flow
-
-```mermaid id="w0tyco"
+```mermaid
 sequenceDiagram
+    autonumber
     participant Device
-    participant MQTT
     participant Ingestion
     participant Kafka
     participant Worker
-    participant Redis
-    participant DB
-
-    Device->>MQTT: Publish Event
-    MQTT->>Ingestion: Forward
-    Ingestion->>Kafka: Produce
-    Kafka->>Worker: Consume
-    Worker->>Redis: Check Idempotency
-    Redis-->>Worker: Exists?
-    Worker->>DB: Persist
-    Worker->>Kafka: Commit Offset
+    participant Sink
+    
+    Device->>Ingestion: [MQTT Publish] Telemetry Event
+    Note over Ingestion: Inject Trace ID & Rate Limit
+    Ingestion->>Kafka: [Produce] JSON Event + Trace Metadata
+    Kafka->>Worker: [Batch Consume] 500 Events
+    Note over Worker: Check Idempotency (Redis)
+    Worker->>Sink: [Write] PostgreSQL (Bulk Insert)
+    Worker->>Kafka: [Commit] Move Offset
 ```
 
 ---
 
-# 🔄 Retry & DLQ Strategy
+# ⚖️ Engineering Trade-offs
 
-### Retry
+### 1. "At-Least-Once" Delivery vs "Exactly-Once"
+We chose **At-Least-Once** with **Sink Idempotency**. True "Exactly-Once" (Kafka transactions) adds significant latency and overhead. Our approach guarantees correctness while maximizing throughput.
 
-* Immediate retry
-* Exponential backoff + jitter
-* Max retry threshold
+### 2. Kafka vs NATS
+Kafka was selected for its **Durable Log** capabilities. In IoT, being able to "Replay" data from 2 hours ago if a database fix is deployed is non-negotiable.
 
-### DLQ
-
-* Failed after retries → DLQ
-* Used for debugging & replay
+### 3. Log-Based Persistence
+We prioritize the **Log (Kafka)** as the source of truth. If the Database (Postgres) is slow, the Ingestion service continues at 100% speed, buffering the pressure until the DB scales.
 
 ---
 
-# 🧠 Idempotency Strategy
+# 🧱 Project Structure (Monorepo)
 
-* Key: `device_id + event_id`
-* Stored in Redis with TTL
-
-👉 Ensures:
-**Effectively-once processing on top of at-least-once delivery**
-
----
-
-# ⚡ Backpressure Strategy
-
-Multi-layer defense:
-
-1. Kafka lag monitoring
-2. Auto-scaling consumers
-3. Ingestion throttling (semaphore)
-4. Kafka pause/resume
-5. Priority queues
-6. Event sampling under extreme load
-
----
-
-# 🌍 Multi-Region Strategy (Future)
-
-* Active-Active regions
-* Region-local Kafka clusters
-* Global metadata store
-
-Tradeoff:
-
-* Eventual consistency vs availability
-
----
-
-# ⚖️ Design Tradeoffs
-
-### Kafka vs NATS
-
-* Kafka → durability + replay
-* Tradeoff → operational complexity
-
-### At-least-once vs Exactly-once
-
-* At-least-once chosen
-* Idempotency ensures correctness
-
-### Redis vs DB
-
-* Redis → low latency
-* Tradeoff → TTL expiry
-
-### Partitioning
-
-* Device-based key
-* Tradeoff → hotspot risk
-
-### Consistency Model
-
-* Eventual consistency
-* Tradeoff → temporary divergence
-
----
-
-# 🧱 Project Structure
-
-```id="3w8nax"
+```text
 IoTFlow/
-├── apps/                        # Specialized Microservices
-│   ├── ingestion/               # MQTT -> Kafka Ingestion
-│   └── worker/                  # Kafka -> PG Event Worker
-├── libs/                        # Shared Internal Libraries
-│   └── shared/                  # The core Clean Architecture Pipeline
-├── infra/                       # Infrastructure-as-Code & Config
-│   ├── k8s/                     # Kubernetes Manifests & HPA
-│   └── docker-compose.yml       # Local dev environment
-├── docs/                        # Technical Case Study & Design
-│   ├── architecture.md          # System Design Deep-Dive
-│   ├── failures.md              # Fault-Tolerance & Resilience Audit
-│   ├── scaling.md               # Capacity Planning & Sizing
-│   └── design_decisions.md      # Trade-offs & Staff Engineer insights
-├── scripts/                     # Operational Tooling
-│   └── simulate_iot.py          # High-fidelity IoT Traffic Simulator
-├── README.md                    # Executive Summary & Entry point
-├── CONTRIBUTING.md              # Software Engineering Standards
-└── LICENSE                      # Apache 2.0
+├── apps/                        # Microservices (Go/Python/Node friendly)
+├── libs/                        # The "Core" Shared Logic (The Clean Pipeline)
+├── infra/                       # Production Config (K8s, Docker, Terraform)
+├── docs/                        # The "Paperwork" (Sizing, Failover, Runbooks)
+├── scripts/                     # SRE Tooling & Simulation
+├── Makefile                     # Zero-Friction Developer Entrypoint
+└── CONTRIBUTING.md              # Engineering Standards (Linting, Testing)
 ```
 
 ---
 
-# 🛠️ Running Locally
+# 🛠️ Developer Experience (Zero-Friction)
 
-```bash id="84gk8l"
-# Start the infrastructure
-docker compose up -d --build
-```
-
-### Simulate traffic
-
-```bash id="7v82ul"
-# Professional IoT simulator script
-pip install paho-mqtt
-python scripts/simulate_iot.py
+### One-Command Setup
+We believe in a **5-minute onboarding**. Use the [Makefile](Makefile) to manage the entire stack:
+```bash
+make up        # Start local infrastructure (Docker Compose)
+make test      # Run exhaustive unit and integration tests
+make lint      # Check type-safety (mypy) and format (black)
+make simulate  # Launch high-fidelity IoT device simulator
 ```
 
 ---
 
-# 📊 Observability
+# 📊 Observability (The "Staff-Engineer" View)
 
-* Kafka lag
-* Retry rate
-* DLQ size
-* Throughput (TPS)
-* Latency (p95/p99)
-
----
-
-# 🚨 Operational Considerations
-
-* Zero-downtime deployments
-* Kafka rebalancing impact
-* Redis eviction policies
-* Alerting (DLQ spikes, lag)
-* SLO monitoring
+Every service exports **Prometheus Metrics** on `:9100`:
+- **Ingestion Latency**: p50, p90, p99.
+- **Kafka Log Lag**: Measures real-time backpressure.
+- **DLQ Rate**: Alerts as soon as poison events enter the system.
+- **Retry Jitter**: Visualizes background recovery behavior.
 
 ---
 
-# 📖 Documentation
+# 🧠 Performance Insights
+> "In high-scale systems, the fastest way to process data is to do it in batches, but the safest way is one-by-one. IoTFlow solves this by implementing **Atomic Batching with Single-Event Isolation** logic."
 
-* [**System Design**](docs/architecture.md): Architectural deep-dive and mermaid diagrams.
-* [**Capacity Planning**](docs/scaling.md): Hardware sizing and capacity justification.
-* [**Failover Analysis**](docs/failures.md): 15 failure scenarios and mitigations.
-* [**Design Decisions**](docs/design_decisions.md): Trade-offs and engineering rationale.
-* [**Strategic Roadmap**](docs/STRATEGIC_ISSUES.md): High-impact roadmap and "Smart Hack" issues.
-
----
-
-# 🧠 Key Insight
-
-> “In distributed systems, reliability is engineered — not assumed.”
-
-IoTFlow prioritizes:
-
-* Idempotency at the sink
-* Replay via Kafka
-* Failure isolation
-
----
-
-# 🤝 Contributing
-
-See [**CONTRIBUTING.md**](CONTRIBUTING.md)
+Explore the detailed case studies:
+- [System Design Deep-Dive](docs/architecture.md)
+- [Capacity & Sizing Guide](docs/scaling.md)
+- [Failure Mode Audit](docs/failures.md)
 
 ---
 
 # 📜 License
-
-Apache License 2.0
+Apache License 2.0 — See [LICENSE](LICENSE).

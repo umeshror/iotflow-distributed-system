@@ -29,6 +29,7 @@ log = structlog.get_logger(__name__)
 class IngestionContext:
     """Context passed through the ingestion pipeline."""
     raw_message: dict[str, Any]
+    trace_id: str = ""  # Correlation ID for end-to-end tracking
     device_id: str = "unknown"
     event: IoTEvent | None = None
     processed: bool = False
@@ -41,19 +42,16 @@ class LoggingHandler:
         parts = topic.split("/")
         context.device_id = parts[1] if len(parts) >= 2 else "unknown"
         
-        try:
-            raw_payload = json.loads(context.raw_message["payload"])
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            EVENTS_DROPPED.labels(reason="invalid_json").inc()
-            log.warning("Invalid JSON payload", device_id=context.device_id, error=str(exc))
-            return
-
         EVENTS_RECEIVED.labels(
             device_id=context.device_id, 
             event_type=raw_payload.get("event_type", "unknown")
         ).inc()
         
         context.raw_message["parsed_payload"] = raw_payload
+        # Add trace_id to raw_message metadata so it's pickled and sent to Kafka
+        context.raw_message["trace_id"] = context.trace_id
+        
+        log.info("Processing MQTT message", device_id=context.device_id, trace_id=context.trace_id)
         await next_call()
 
 class ValidationHandler:
@@ -95,9 +93,13 @@ class KafkaPublishHandler:
             return
 
         try:
+            # Propagate trace_id to Kafka record headers/value
+            payload = context.event.to_kafka_dict()
+            payload["_trace_id"] = context.trace_id
+            
             await self._producer.produce(
                 topic=settings.KAFKA_TOPIC_RAW,
-                value=context.event.to_kafka_dict(),
+                value=payload,
                 key=context.event.device_id,
             )
             EVENTS_VALIDATED.inc()
@@ -106,6 +108,7 @@ class KafkaPublishHandler:
                 event_id=context.event.event_id,
                 device_id=context.event.device_id,
                 event_type=context.event.event_type,
+                trace_id=context.trace_id,
             )
             context.processed = True
             await next_call()

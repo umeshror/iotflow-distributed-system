@@ -1,29 +1,34 @@
-FROM python:3.12-slim AS base
+# --- Build Stage ---
+FROM python:3.12-slim AS builder
 
-RUN addgroup --system iotflow && adduser --system --ingroup iotflow iotflow
+WORKDIR /build
+
+COPY apps/worker/requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# --- Final Stage ---
+FROM python:3.12-slim
+
+RUN groupadd -r iotflow && useradd -r -g iotflow iotflow
 
 WORKDIR /app
 
-COPY apps/worker/requirements.txt ./
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+COPY --from=builder /install /usr/local
 
-# Copy shared libraries
+# Copy shared libraries and service source
 COPY libs /app/libs
-
-# Copy service source
-COPY apps/worker /app
+COPY apps/worker /app/worker
 
 RUN chown -R iotflow:iotflow /app
 USER iotflow
 
-# Set PYTHONPATH to include the root of the app so libs can be imported
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app/worker:/app
 
-# Prometheus metrics on 9101
 EXPOSE 9101
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:9101/metrics')"
 
+WORKDIR /app/worker
 CMD ["python", "main.py"]

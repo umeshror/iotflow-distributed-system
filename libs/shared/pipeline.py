@@ -6,9 +6,16 @@ Allows chaining multiple handlers (middlewares) to process an event.
 from __future__ import annotations
 
 import asyncio
+import time
+import uuid
 from typing import Any, Awaitable, Callable, Generic, Protocol, TypeVar
 
-T = TypeVar("T")
+# T must have a trace_id attribute
+T = TypeVar("T", bound="HasTraceId")
+
+class HasTraceId(Protocol):
+    """Interface for a context that has a trace_id."""
+    trace_id: str
 
 class Handler(Protocol, Generic[T]):
     """Interface for a pipeline handler."""
@@ -34,13 +41,24 @@ class Pipeline(Generic[T]):
         if not self._handlers:
             return
 
-        index = 0
+        # Ensure a trace ID exists for observability
+        if not getattr(context, "trace_id", None):
+            setattr(context, "trace_id", str(uuid.uuid4()))
 
         async def _dispatch(idx: int) -> None:
             if idx >= len(self._handlers):
                 return
             
             handler = self._handlers[idx]
-            await handler(context, lambda: _dispatch(idx + 1))
+            handler_name = handler.__class__.__name__
+            
+            # observability: Automatic timing for each handler
+            start_time = time.perf_counter()
+            try:
+                await handler(context, lambda: _dispatch(idx + 1))
+            finally:
+                duration = time.perf_counter() - start_time
+                # In a real system, we'd emit this to Prometheus/OTEL here
+                # For now, we'll just ensure the structure is there.
 
         await _dispatch(0)

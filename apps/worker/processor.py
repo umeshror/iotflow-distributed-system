@@ -54,8 +54,10 @@ class EventProcessor:
 
         try:
             with PROCESSING_LATENCY.time():
+                trace_id = raw_event.get("_trace_id", "")
                 context = WorkerContext(
                     raw_event=raw_event,
+                    trace_id=trace_id,
                     kafka_partition=kafka_partition,
                     kafka_offset=kafka_offset,
                 )

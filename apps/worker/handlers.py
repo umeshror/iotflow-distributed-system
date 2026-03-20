@@ -30,6 +30,7 @@ log = structlog.get_logger(__name__)
 class WorkerContext:
     """Context passed through the worker pipeline."""
     raw_event: dict[str, Any]
+    trace_id: str = ""  # Correlation ID
     kafka_partition: int | None = None
     kafka_offset: int | None = None
     event: IoTEvent | None = None
@@ -50,7 +51,7 @@ class IdempotencyHandler:
             return
 
         if not await self._guard.is_new(event_id):
-            log.debug("Duplicate event skipped", event_id=event_id)
+            log.debug("Duplicate event skipped", event_id=event_id, trace_id=context.trace_id)
             return
         
         await next_call()
@@ -156,6 +157,7 @@ class DeviceStateHandler:
             event_id=event.event_id,
             device_id=event.device_id,
             duration_ms=round(duration * 1000, 2),
+            trace_id=context.trace_id,
         )
         context.processed = True
         await next_call()
