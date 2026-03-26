@@ -135,7 +135,7 @@ make simulate  # Launch high-fidelity IoT device simulator
 
 ---
 
-# 📊 Observability (The "Staff-Engineer" View)
+# 📊 Observability 
 
 Every service exports **Prometheus Metrics** on `:9100`:
 - **Ingestion Latency**: p50, p90, p99.
